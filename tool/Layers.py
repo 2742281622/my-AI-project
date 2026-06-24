@@ -9,7 +9,7 @@ class ReLU:# ReLU层
     def __init__(self):
         self.mask = None
 
-    def forward(self, x):
+    def forward(self, x, train_flg=True):
         self.mask = (x <= 0)
         out = x.copy()
         out[self.mask] = 0
@@ -27,7 +27,7 @@ class Sigmoid:# Sigmoid层
     def __init__(self):
         self.out = None
 
-    def forward(self, x):
+    def forward(self, x, train_flg=True):
         out = sigmoid(x)
         self.out = out
         return out
@@ -49,7 +49,7 @@ class Affine:# 全连接层
         self.dW = None
         self.db = None
 
-    def forward(self, x):
+    def forward(self, x, train_flg=True):
         # 对应张量
         self.original_x_shape = x.shape
         x = x.reshape(x.shape[0], -1)
@@ -67,61 +67,15 @@ class Affine:# 全连接层
         dx = dx.reshape(*self.original_x_shape)  # 还原输入数据的形状（对应张量）
         return dx
 
-class Identity:# 无层
+class Identity:# 恒等层
     def __init__(self):
         pass
 
-    def forward(self, x):
+    def forward(self, x, train_flg=True):
         return x
 
     def backward(self, dout):
         return dout
-
-class SoftmaxWithLoss:
-    def __init__(self):
-        self.loss = None
-        self.y = None # softmax的输出
-        self.t = None # 监督数据
-
-    def forward(self, x, t):
-        self.t = t
-        self.y = softmax(x)
-        self.loss = cross_entropy_error(self.y, self.t)
-        
-        return self.loss
-
-    def backward(self, dout=1):
-        batch_size = self.t.shape[0]
-        if self.t.size == self.y.size: # 监督数据是one-hot-vector的情况
-            dx = (self.y - self.t) / batch_size
-        else:
-            dx = self.y.copy()
-            dx[np.arange(batch_size), self.t] -= 1
-            dx = dx / batch_size
-        
-        return dx
-
-class Softmax:
-    def __init__(self):
-        self.loss = None
-        self.y = None # softmax的输出
-        self.t = None # 监督数据
-
-    def forward(self, x, t):
-        self.t = t
-        self.y = softmax(x)
-        return self.y
-
-    def backward(self, dout=1):
-        batch_size = self.t.shape[0]
-        if self.t.size == self.y.size: # 监督数据是one-hot-vector的情况
-            dx = (self.y - self.t) / batch_size
-        else:
-            dx = self.y.copy()
-            dx[np.arange(batch_size), self.t] -= 1
-            dx = dx / batch_size
-        
-        return dx
 
 class Dropout:# Dropout层
     def __init__(self, dropout_ratio=0.5):
@@ -236,7 +190,7 @@ class Convolution:# 卷积层
         self.dW = None
         self.db = None
 
-    def forward(self, x):
+    def forward(self, x, train_flg=True):
         FN, C, FH, FW = self.W.shape
         N, C, H, W = x.shape
         out_h = 1 + int((H + 2*self.pad - FH) / self.stride)
@@ -278,7 +232,7 @@ class Pooling:# 池化层
         self.x = None
         self.arg_max = None
 
-    def forward(self, x):
+    def forward(self, x, train_flg=True):
         N, C, H, W = x.shape
         out_h = int(1 + (H - self.pool_h) / self.stride)
         out_w = int(1 + (W - self.pool_w) / self.stride)
@@ -306,4 +260,60 @@ class Pooling:# 池化层
         dcol = dmax.reshape(dmax.shape[0] * dmax.shape[1] * dmax.shape[2], -1)
         dx = col2im(dcol, self.x.shape, self.pool_h, self.pool_w, self.stride, self.pad)
         
+        return dx
+
+class SoftmaxWithLoss:
+    def __init__(self):
+        self.loss = None
+        self.y = None # softmax的输出
+        self.t = None # 监督数据
+
+    def forward(self, x, t):
+        self.t = t
+        self.y = softmax(x)
+        self.loss = cross_entropy_error(self.y, self.t)
+        
+        return self.loss
+
+    def backward(self, dout=1):
+        batch_size = self.t.shape[0]
+        if self.t.size == self.y.size: # 监督数据是one-hot-vector的情况
+            dx = (self.y - self.t) / batch_size
+        else:
+            dx = self.y.copy()
+            dx[np.arange(batch_size), self.t] -= 1
+            dx = dx / batch_size
+        
+        return dx
+
+class BCEWithLogitsLoss:# 二分类/多标签交叉熵损失层
+    def __init__(self):
+        self.loss = None
+        self.y = None # sigmoid的输出
+        self.t = None # 监督数据
+    def  forward(self, x, t):
+        self.t = t
+        self.y = sigmoid(x)
+        self.loss = binary_cross_entropy(self.y, self.t)
+        return self.loss
+    def backward(self, dout=1):
+        dx = dout * (self.y - self.t)
+        return dx
+
+class MSELoss:# 均方误差损失层，用于回归任务
+    def __init__(self):
+        self.y = None
+        self.t = None
+        self.batch_size = None
+
+    def forward(self, x, t):
+        self.t = t
+        self.y = x  # 回归无激活，直接用全连接输出
+        self.batch_size = x.shape[0]
+        # 均方误差，均值形式
+        self.loss = np.sum((self.y - self.t)**2) / self.batch_size
+        return self.loss
+
+    def backward(self, dout=1):
+        dx = dout * 2 * (self.y - self.t) / self.batch_size
         return dx

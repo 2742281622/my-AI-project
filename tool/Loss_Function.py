@@ -17,40 +17,19 @@ def cross_entropy_error(y, t):# 交叉熵误差 分类任务
     batch_size = y.shape[0]
     return -np.sum(np.log(y[np.arange(batch_size), t] + 1e-7)) / batch_size
 
+def binary_cross_entropy(y, t):# 二分类/多标签损失函数
+    # BCE 二分类/多标签损失，y是sigmoid输出(0~1)，t是0/1标签
+    # L = -sum(t * log(y) + (1 - t) * log(1 - y))
+    # 加极小值防止log(0)出现负无穷
+    delta = 1e-7
+    return -np.sum(t * np.log(y + delta) + (1 - t) * np.log(1 - y + delta))
+
+def binary_cross_entropy_batch(y, t):
+    delta = 1e-7
+    loss = -np.sum(t * np.log(y + delta) + (1 - t) * np.log(1 - y + delta))
+    return loss / y.shape[0]
+
+
 def softmax_loss(X, t):# Softmax函数的损失函数
     y = softmax(X)
     return cross_entropy_error(y, t)
-
-def L2_loss(Lambda, params):# L2正则化损失函数
-    """
-    L2正则化损失函数
-    params: 包含权重和偏置参数的字典
-    Lambda: 正则化系数，设置得越大，对大的权重施加的惩罚就越重
-    """
-    weight_decay = 0
-    for i in range(int(len(params)/2)):
-        weight_decay += 0.5 * Lambda * np.sum(params['W'+str(i+1)] ** 2)
-    return weight_decay
-
-
-def L1_loss(Lambda, params):# L1正则化损失函数
-    """
-    L1正则化损失函数
-    params: 包含权重和偏置参数的字典
-    Lambda: 正则化系数，设置得越大，对大的权重施加的惩罚就越重
-    """
-    weight_decay = 0
-    for i in range(int(len(params)/2)):
-        weight_decay += Lambda * np.sum(np.abs(params['W'+str(i+1)]))
-    return weight_decay
-
-def L_infinity_loss(Lambda, params):# L无穷正则化损失函数
-    """
-    L无穷正则化损失函数
-    params: 包含权重和偏置参数的字典
-    Lambda: 正则化系数，设置得越大，对大的权重施加的惩罚就越重
-    """
-    weight_decay = 0
-    for i in range(int(len(params)/2)):
-        weight_decay += Lambda * np.linalg.norm(params['W'+str(i+1)],np.inf)
-    return weight_decay

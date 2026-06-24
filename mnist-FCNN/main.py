@@ -8,8 +8,19 @@ from tool.Trainer import Trainer
 from tool.dataset.mnist import load_mnist
 
 
+def softmax(x):# Softmax函数
+    if x.ndim == 2:
+        x = x.T
+        x = x - np.max(x, axis=0)
+        y = np.exp(x) / np.sum(np.exp(x), axis=0)
+        return y.T 
+
+    x = x - np.max(x) # 溢出对策
+    return np.exp(x) / np.sum(np.exp(x))
+
+
 def accuracy(x, t):
-    y_pred = np.argmax(trainer.predict(x), axis=1)
+    y_pred = np.argmax(softmax(trainer.predict(x)), axis=1)
     y = np.argmax(t, axis=1)
     return np.mean(y_pred == y)
 
@@ -26,7 +37,7 @@ def show_image(image, label, pred_label=None):
 def test_choose():
     (x_train, t_train), (x_test, t_test) = load_mnist(normalize=True, one_hot_label=True)
     choose = int(input(f'请输入要测试的样本编号(0-{x_test.shape[0]-1})：'))
-    y_pred = np.argmax(trainer.predict(x_test[choose].reshape(1, -1)))
+    y_pred = np.argmax(softmax(trainer.predict(x_test[choose].reshape(1, -1))))
     show_image(x_test[choose], t_test[choose], y_pred)
 
 
@@ -129,7 +140,7 @@ class DrawingCanvas:
     
     def predict_digit(self, event):
         processed = preprocess_image(self.canvas)
-        y_pred = trainer.predict(processed.reshape(1, -1))
+        y_pred = softmax(trainer.predict(processed.reshape(1, -1)))
         pred_label = np.argmax(y_pred)
         confidence = np.max(y_pred)
         
@@ -162,7 +173,7 @@ def test_drawing():
 
 if __name__ == '__main__':
     trainer = Trainer()
-    trainer.load_model('model.op')
+    trainer.load_model('model FC32D.op')
     trainer.show_network()
     
     while True:

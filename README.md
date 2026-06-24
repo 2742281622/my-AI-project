@@ -7,3 +7,6 @@
         -[mnist-FCNN]       手写体数字识别，模型精度91%
             -model.op
             -main.py
+
+# 日志
+260624：增加了l1、l2、l∞正则化，新增BCEWithLogitsLoss、MSELoss层以支持二分类、回归任务

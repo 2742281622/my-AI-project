@@ -18,8 +18,9 @@ from tool.dataset.mnist import load_mnist
 
 class Trainer:
     def __init__(self, x_train=None, t_train=None, x_test=None, t_test=None, optimizer=Momentum,\
-                 epochs=10, batch_size=10, learning_rate=0.01,loss_func=cross_entropy_error,
-                 monitor=True, auto_save=False):
+                 epochs=10, batch_size=10, learning_rate=0.01,task='multi-class',regularization='none',
+                 lambda_w=0.01,
+                 monitor=True, auto_save=False,model_name='model'):
         '''
         训练器
         :param x_train: 训练数据
@@ -30,7 +31,9 @@ class Trainer:
         :param epochs: 训练轮数
         :param batch_size: 单次训练数据批次大小
         :param learning_rate: 学习率
-        :param loss_func: 损失函数
+        :param task: 任务类型 multi-class 多分类 binary-class 二分类 regression 回归
+        :param regularization: 正则化 none 无正则化 l2 l2正则化 l1 l1正则化 L_infinity 无穷范数正则化
+        :param lambda_w: 权重正则化参数
         :param monitor: 是否监控性能
         :param auto_save: 是否自动保存模型参数
         :return:
@@ -41,9 +44,14 @@ class Trainer:
             self.monitor.start()# 开始监控
         
         self.network={}# 网络结构，用于打印
+        self.network['task']=task# 任务类型
+        self.network['regularization']=regularization# 正规则化
+        self.regularization=regularization# 正规则化
+        self.lambda_w=lambda_w# 权重正则化参数
+        self.task=task# 任务类型
+        self.model_name=model_name# 模型名称
         self.network['Optimizer']=optimizer.__name__
         self.optimizer = optimizer()
-        self.loss_func=loss_func# 损失函数
         self.network['layers']={}
         self.layers = OrderedDict()# 层结构，用于实例运算
         self.layer_nub=1
@@ -60,7 +68,7 @@ class Trainer:
         self.t_test = t_test
 
         self.params = {}# 记录层参数
-        self.ache = {}# 记录层参数
+        self.cache = {}# 记录层参数
         self.dout = {}# 记录x的梯度
         self.grads = {}# 记录层梯度
 
@@ -94,23 +102,28 @@ class Trainer:
             for j in range(0,self.x_train.shape[0],self.batch_size):# 遍历所有数据
                 self.__Computational(self.x_train[j:j+self.batch_size],self.t_train[j:j+self.batch_size])# 前向计算
 
-                if self.network['layers']['layer'+str(self.layer_nub-1)]=='SoftmaxWithLoss':# 如果是SoftmaxWithLoss层
-                    pass
-                else:
-                    self.loss=self.loss_func(self.ache['layer'+str(self.layer_nub-1)],self.t_train[j:j+self.batch_size])# 计算loss
-                
-
-                douts=(self.ache['layer'+str(self.layer_nub-2)]-self.t_train[j:j+self.batch_size])/self.batch_size# 计算训练数据的差值
-
-                self.__Computational(dout=douts,backward_flg=True)# 反向计算
+                self.__Computational(dout=1,backward_flg=True)# 反向计算
 
                 self.__get_grads()# 获取梯度
                 for key in self.params.keys():# 对需要的层逐层更新参数
+
+                    if self.regularization != 'none':# 如果有正则化
+                        if self.regularization == 'l1':
+                            # L1正则梯度：dW += λ * sign(W)
+                            self.grads[key]['W'] += self.lambda_w * np.sign(self.params[key]['W'])
+                        elif self.regularization == 'l2':
+                            # L2权重衰减梯度：dW += λ * W
+                            self.grads[key]['W'] += self.lambda_w * self.params[key]['W']
+                        elif self.regularization == 'L_infinity':
+                            # L∞仅作示例，实际几乎不用
+                            self.grads[key]['W'] = self.lambda_w * np.max(np.abs(self.params[key]['W']))
+                    
                     self.optimizer.update(self.params[key], self.grads[key])# 更新参数和梯度
+            
 
-            acc=self.__test()# 测试
-
-            print('accuracy:%.2f%%\tloss:%.12f'% (acc,self.loss))# 每个epoch打印loss和accuracy率
+            test_acc=self.__acc_test()# 测试集accuracy率
+            train_acc=self.__acc_train()# 训练集accuracy率
+            print('test accuracy:%.2f%%\ttrain accuracy:%.2f%%\tloss:%.12f'% (test_acc,train_acc,self.loss))# 每个epoch打印loss和accuracy率
             if self.monitor_flg:# 如果监控性能
                 self.monitor.probe()# 探针
         
@@ -118,7 +131,7 @@ class Trainer:
         self.__Computational(x,train_flg=False)
         if self.monitor_flg:# 如果监控性能
                 self.monitor.probe()# 探针
-        return self.ache['layer'+str(self.layer_nub-2)]
+        return self.cache['layer'+str(self.layer_nub-2)]
 
     def show_network(self):# 打印网络结构
         print('\n==========================================================')
@@ -160,34 +173,69 @@ class Trainer:
         else:# 前向传播
             for i in range(self.layer_nub-1):
                 if i == 0:# 输入层
-                    self.ache['layer'+str(i+1)]=self.layers['layer'+str(i+1)].forward(x)
+                    self.cache['layer'+str(i+1)]=self.layers['layer'+str(i+1)].forward(x,train_flg=train_flg)
                 elif i != self.layer_nub-2:# 隐藏层
-                    self.ache['layer'+str(i+1)]=self.layers['layer'+str(i+1)].forward(self.ache['layer'+str(i)])
+                    self.cache['layer'+str(i+1)]=self.layers['layer'+str(i+1)].forward(self.cache['layer'+str(i)],train_flg=train_flg)
                 else:
-                    if type(self.layers['layer'+str(i+1)])==SoftmaxWithLoss and train_flg:# 最后一层层为SoftmaxWithLoss层
-                        self.loss=self.layers['layer'+str(i+1)].forward(self.ache['layer'+str(i)], t)
-                    elif train_flg:
-                        self.ache['layer'+str(i+1)]=self.layers['layer'+str(i+1)].forward(self.ache['layer'+str(i)], t)
+                    if train_flg:# 最后一层 计练
+                        self.loss=self.layers['layer'+str(i+1)].forward(self.cache['layer'+str(i)], t)
 
-    def __test(self):# 测试
+    def __acc_test(self):# 测试集accuracy率
         batch=self.x_test.shape[0]
+        acc=0.00
         try:
             result=self.predict(self.x_test)
         except MemoryError:
-            batch=batch/2
+            batch=batch//2
             for i in range(0,self.x_test.shape[0],batch):
                 result=self.predict(self.x_test[i:i+batch])
 
-        result=np.argmax(result,axis=1)
-        t_test=np.argmax(self.t_test,axis=1)
-        return (np.mean(result==t_test)*100)
+        if self.task=='multi-class':# 多分类
+            result=np.argmax(result,axis=1)
+            t_test=np.argmax(self.t_test,axis=1)
+            acc=np.mean(result==t_test)*100
+        elif self.task=='binary-class':# 二分类
+            result=np.argmax(result,axis=1)
+            t_test=np.argmax(self.t_test,axis=1)
+            acc=np.mean(result==t_test)*100
+        elif self.task=='regression':# 回归
+            result=result.reshape(-1)
+            t_test=self.t_test
+            acc=np.mean((result - t_test) ** 2)
+        
+        return acc
+
+    def __acc_train(self):# 训练集accuracy率
+        batch=self.t_train.shape[0]
+        acc=0.00
+        try:
+            result=self.predict(self.x_train)
+        except MemoryError:
+            batch=batch//2
+            for i in range(0,self.x_train.shape[0],batch):
+                result=self.predict(self.x_train[i:i+batch])
+
+        if self.task=='multi-class':# 多分类
+            result=np.argmax(result,axis=1)
+            t_test=np.argmax(self.t_train,axis=1)
+            acc=np.mean(result==t_test)*100
+        elif self.task=='binary-class':# 二分类
+            result=np.argmax(result,axis=1)
+            t_test=np.argmax(self.t_train,axis=1)
+            acc=np.mean(result==t_test)*100
+        elif self.task=='regression':# 回归
+            result=result.reshape(-1)
+            t_test=self.t_train
+            acc=np.mean((result - t_test) ** 2)
+        
+        return acc
 
     def __save_model(self):# 保存模型
         model = {}
         model['network'] = self.network
         model['layers'] = self.layers
         model['params'] = self.params
-        with open('model.op', 'wb') as f:
+        with open(self.model_name+'.op', 'wb') as f:
             pickle.dump(model, f)
 
     def __get_grads(self):# 获取层梯度
@@ -213,10 +261,15 @@ if __name__ == '__main__':
     x_test = x_test[:5000]
     t_test = t_test[:5000]
 
-    trainer = Trainer(x_train, t_train, x_test, t_test, optimizer=Adam, epochs=100, batch_size=100,\
-                      monitor=True, auto_save=False)
+    load_models = False
+
+    save_model = False
+    model_name = 'model FC00'
+
+
+    trainer = Trainer(x_train, t_train, x_test, t_test, optimizer=Adam, epochs=1000, batch_size=100,\
+                      monitor=True, auto_save=save_model,regularization='none',model_name=model_name)
     
-    load_models = True
 
 
     if load_models:
@@ -229,8 +282,7 @@ if __name__ == '__main__':
         trainer.add_layer(Affine).set_layer(W=np.random.randn(64, 128), b=np.random.randn(128))
         trainer.add_layer(ReLU)
         trainer.add_layer(Affine).set_layer(W=np.random.randn(128, 10), b=np.random.randn(10))
-        #trainer.add_layer(SoftmaxWithLoss)
-        trainer.add_layer(Softmax)
+        trainer.add_layer(SoftmaxWithLoss)
 
 
     trainer.show_network()# 显示网络信息
